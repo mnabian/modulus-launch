@@ -50,7 +50,7 @@ class MGNRollout:
         )
 
         # instantiate the model
-        self.model = MeshGraphNet(6, 3, 3)
+        self.model = MeshGraphNet(8, 3, 1)
         if wb.config.jit:
             self.model = torch.jit.script(self.model).to(self.device)
         else:
@@ -66,12 +66,12 @@ class MGNRollout:
 
     def load_checkpoint(self):
         # load checkpoint
-        try:
-            checkpoint = torch.load(wb.config.ckpt_path)
-            self.model.load_state_dict(checkpoint["model_state_dict"])
-            print(f"Successfully loaded checkpoint in {wb.config.ckpt_path}")
-        except:
-            raise RuntimeError("Rollout requires network checkpoint")
+        #try:
+        checkpoint = torch.load(wb.config.ckpt_path)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        print(f"Successfully loaded checkpoint in {wb.config.ckpt_path}")
+        #except:
+        #    raise RuntimeError("Rollout requires network checkpoint")
 
     def predict(self, idx):
         self.pred, self.exact, self.faces, self.graphs = [], [], [], []
@@ -99,7 +99,10 @@ class MGNRollout:
             invar[:, 0:2] = self.dataset.normalize_node(
                 invar[:, 0:2], stats["velocity_mean"], stats["velocity_std"]
             )
-            pred_i = self.model(graph, invar, graph.edata["x"]).detach()  # predict
+            x = graph.ndata["mesh_pos"][:, 0:1].requires_grad_(True)
+            y = graph.ndata["mesh_pos"][:, 1:2].requires_grad_(True)
+            u, v, p = self.model(graph, x, y, invar, graph.edata["x"])  # predict
+            pred_i = torch.cat((u,v,p), dim=-1).detach()
 
             # denormalize prediction
             pred_i[:, 0:2] = self.dataset.denormalize(

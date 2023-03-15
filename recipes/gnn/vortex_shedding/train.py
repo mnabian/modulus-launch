@@ -58,7 +58,10 @@ class MGNTrainer:
         )
 
         # instantiate the model
-        self.model = MeshGraphNet(6, 3, 3)
+        self.model = MeshGraphNet(
+            8, 3, 1
+        )  # this first two inputs (among 8 features) are x,y
+
         if wb.config.jit:
             self.model = torch.jit.script(self.model).to(self.device)
         else:
@@ -89,10 +92,11 @@ class MGNTrainer:
     def train(self, graph):
         graph = graph.to(self.device)
         self.optimizer.zero_grad()
-        loss = self.forward(graph)
+        loss_data, loss_phys = self.forward(graph)
+        loss = loss_data + loss_phys
         self.backward(loss)
         self.scheduler.step()
-        return loss
+        return loss_data, loss_phys
 
     def load_checkpoint(self):
         # load checkpoint
@@ -122,9 +126,19 @@ class MGNTrainer:
     def forward(self, graph):
         # forward pass
         with autocast(enabled=wb.config.amp):
-            pred = self.model(graph, graph.ndata["x"], graph.edata["x"])
-            loss = self.criterion(pred, graph.ndata["y"])
-            return loss
+            x = graph.ndata["mesh_pos"][:, 0:1].requires_grad_(True)
+            y = graph.ndata["mesh_pos"][:, 1:2].requires_grad_(True)
+            u, v, p = self.model(graph, x, y, graph.ndata["x"], graph.edata["x"])
+            pred = torch.cat((u, v, p), dim=-1)
+            loss_data = self.criterion(pred, graph.ndata["y"])
+
+            # print(pred[:,0].size())
+            # print(torch.squeeze(x).size())
+            # exit()
+            u__x = torch.autograd.grad(u, [x], grad_outputs=torch.ones_like(u), create_graph=True)[0]
+            v__y = torch.autograd.grad(v, [y], grad_outputs=torch.ones_like(v), create_graph=True)[0]
+            loss_phys = torch.mean((u__x + v__y)**2)
+            return loss_data, loss_phys
 
     def backward(self, loss):
         # backward pass
@@ -144,11 +158,11 @@ if __name__ == "__main__":
     print("Training started...")
     for epoch in range(trainer.epoch_init + 1, wb.config["epochs"]):
         for graph in trainer.dataloader:
-            loss = trainer.train(graph)
+            loss_data, loss_phys = trainer.train(graph)
         print(
-            f"epoch: {epoch}, loss: {loss:10.3e}, time per epoch: {(time.time()-start):10.3e}"
+            f"epoch: {epoch}, loss: {loss_data + loss_phys:10.3e}, loss_data: {loss_data:10.3e},, loss_phys: {loss_phys:10.3e}, time per epoch: {(time.time()-start):10.3e}"
         )
-        wb.log({"loss": loss.detach().cpu()})
+        wb.log({"loss": (loss_data + loss_phys).detach().cpu()})
 
         trainer.save_checkpoint(epoch)
         start = time.time()

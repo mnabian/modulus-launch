@@ -24,7 +24,7 @@ batch_size:
 epochs:
   value: 25
 num_training_samples:
-  value: 400
+  value: 500
 num_training_time_steps:
   value: 300
 lr:
@@ -36,7 +36,7 @@ lr_decay_rate:
 amp:
   value: False
 jit:
-  value: True
+  value: False
 
 # test configs
 num_test_samples:
